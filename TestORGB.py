@@ -9,6 +9,7 @@ __copyright__ = 'Copyright (c) 2014'
 __license__   = 'Apache 2.0'
 __version__   = '1.0'
 
+import time
 import numpy
 from PIL import Image
 import SightSpotUtil
@@ -44,19 +45,24 @@ def _colorize_channel(channel, c_pos, c_neg):
 
 if __name__ == '__main__':
     print 'Test some basic oRGB color conversions:'
-    print "RGB (0, 0, 0) is oRGB (%f, %f, %f)" % _rgb2orgb(0, 0, 0) # Black.
-    print "RGB (1, 0, 0) is oRGB (%f, %f, %f)" % _rgb2orgb(1, 0, 0) # Red.
-    print "RGB (0, 1, 0) is oRGB (%f, %f, %f)" % _rgb2orgb(0, 1, 0) # Green.
-    print "RGB (0, 0, 1) is oRGB (%f, %f, %f)" % _rgb2orgb(0, 0, 1) # Blue.
-    print "RGB (1, 1, 0) is oRGB (%f, %f, %f)" % _rgb2orgb(1, 1, 0) # Yellow.
-    print "RGB (0, 1, 1) is oRGB (%f, %f, %f)" % _rgb2orgb(0, 1, 1) # Sky-blue.
-    print "RGB (1, 0, 1) is oRGB (%f, %f, %f)" % _rgb2orgb(1, 0, 1) # Magenta.
-    print "RGB (1, 1, 1) is oRGB (%f, %f, %f)" % _rgb2orgb(1, 1, 1) # White.
+    print "RGB (0, 0, 0) is oRGB (%f, %f, %f) for BLACK   " % _rgb2orgb(0, 0, 0) # Black.
+    print "RGB (1, 0, 0) is oRGB (%f, %f, %f) for RED     " % _rgb2orgb(1, 0, 0) # Red.
+    print "RGB (0, 1, 0) is oRGB (%f, %f, %f) for GREEN   " % _rgb2orgb(0, 1, 0) # Green.
+    print "RGB (0, 0, 1) is oRGB (%f, %f, %f) for BLUE    " % _rgb2orgb(0, 0, 1) # Blue.
+    print "RGB (1, 1, 0) is oRGB (%f, %f, %f) for YELLOW  " % _rgb2orgb(1, 1, 0) # Yellow.
+    print "RGB (0, 1, 1) is oRGB (%f, %f, %f) for SKY-BLUE" % _rgb2orgb(0, 1, 1) # Sky-blue.
+    print "RGB (1, 0, 1) is oRGB (%f, %f, %f) for MAGENTA " % _rgb2orgb(1, 0, 1) # Magenta.
+    print "RGB (1, 1, 1) is oRGB (%f, %f, %f) for WHITE   " % _rgb2orgb(1, 1, 1) # White.
 
     print 'Show channels of test image:'
     image = Image.open('flower.jpg')
     rgb_image = numpy.asarray(image, dtype='float32')
+
+    start = time.clock()
     orgb_image = SightSpotUtil.eval_orgb_image(rgb_image)
+    print 'ORGB image extracted in', time.clock() - start, 'sec.'
+
+    print 'Colorizing...'
     lu_channel = orgb_image[:,:,0]
     rg_channel = orgb_image[:,:,1]
     yb_channel = orgb_image[:,:,2]
