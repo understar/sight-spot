@@ -14,6 +14,7 @@ import sys
 import numpy
 import numpy.linalg
 import scipy.ndimage
+import scipy.fftpack
 from PIL import Image
 
 def _eval_new_orgb_angle(rt, mask, add, mul):
@@ -61,6 +62,12 @@ def eval_orgb_image(rgb_image):
 
 ################################################################################
 
+def _ft_gaussian_blur(fft_image, sigma, pad_x, pad_y, w, h):
+    convolved_image =  scipy.ndimage.fourier_gaussian(fft_image, [sigma, sigma, 0.0])
+    blurred_image = scipy.fftpack.ifft2(convolved_image, axes=(0, 1)).real
+    cut_image = blurred_image[pad_y:pad_y+h, pad_x:pad_x+w,:]
+    return cut_image
+
 def eval_saliency_map(orgb_image, small_sigma, large_sigma, params=(0.0, 0.0, 0.0)):
     """
     Calculates raw saliency map from given oRGB image.
@@ -86,31 +93,31 @@ def eval_saliency_map(orgb_image, small_sigma, large_sigma, params=(0.0, 0.0, 0.
     assert(large_sigma > small_sigma)
     assert((type(params) == tuple and len(params) == 3) or params == 'auto')
 
-    small_sigma_1 = 1 * small_sigma
-    small_sigma_2 = 2 * small_sigma
-    small_sigma_4 = 4 * small_sigma
+    w = orgb_image.shape[1]
+    h = orgb_image.shape[0]
+    pad_x = w / 8
+    pad_y = h / 8
+    padded_image = numpy.zeros((h + 2 * pad_y, w + 2 * pad_x, 3), dtype='float32')
+    padded_image[pad_y:pad_y+h, pad_x:pad_x+w,:] = orgb_image[:,:,:]
+    fft_image = scipy.fftpack.fft2(padded_image, axes=(0, 1))
 
-    small_blur_image_1 = scipy.ndimage.gaussian_filter(orgb_image, [small_sigma_1, small_sigma_1, 0], mode='constant')
-    small_blur_image_2 = scipy.ndimage.gaussian_filter(orgb_image, [small_sigma_2, small_sigma_2, 0], mode='constant')
-    small_blur_image_4 = scipy.ndimage.gaussian_filter(orgb_image, [small_sigma_4, small_sigma_4, 0], mode='constant')
+    small_blur_image_1 = _ft_gaussian_blur(fft_image, 1 * small_sigma, pad_x, pad_y, w, h)
+    small_blur_image_2 = _ft_gaussian_blur(fft_image, 2 * small_sigma, pad_x, pad_y, w, h)
+    small_blur_image_4 = _ft_gaussian_blur(fft_image, 4 * small_sigma, pad_x, pad_y, w, h)
 
-    large_sigma_1 = 1 * large_sigma
-    large_sigma_2 = 2 * large_sigma
-    large_sigma_4 = 4 * large_sigma
-
-    large_blur_image_1 = scipy.ndimage.gaussian_filter(orgb_image, [large_sigma_1, large_sigma_1, 0], mode='constant')
-    large_blur_image_2 = scipy.ndimage.gaussian_filter(orgb_image, [large_sigma_2, large_sigma_2, 0], mode='constant')
-    large_blur_image_4 = scipy.ndimage.gaussian_filter(orgb_image, [large_sigma_4, large_sigma_4, 0], mode='constant')
+    large_blur_image_1 = _ft_gaussian_blur(fft_image, 1 * large_sigma, pad_x, pad_y, w, h)
+    large_blur_image_2 = _ft_gaussian_blur(fft_image, 2 * large_sigma, pad_x, pad_y, w, h)
+    large_blur_image_4 = _ft_gaussian_blur(fft_image, 4 * large_sigma, pad_x, pad_y, w, h)
 
     difference_1 = small_blur_image_1 - large_blur_image_1
     difference_2 = small_blur_image_2 - large_blur_image_2
     difference_4 = small_blur_image_4 - large_blur_image_4
 
-    saliency_map_1 = numpy.apply_along_axis(numpy.linalg.norm, 2, difference_1) / 3.0
-    saliency_map_2 = numpy.apply_along_axis(numpy.linalg.norm, 2, difference_2) / 3.0
-    saliency_map_4 = numpy.apply_along_axis(numpy.linalg.norm, 2, difference_4) / 3.0
+    saliency_map_1 = numpy.sqrt(numpy.sum(numpy.square(difference_1), axis=2))
+    saliency_map_2 = numpy.sqrt(numpy.sum(numpy.square(difference_2), axis=2))
+    saliency_map_4 = numpy.sqrt(numpy.sum(numpy.square(difference_4), axis=2))
 
-    saliency_map = (saliency_map_1 + saliency_map_2 + saliency_map_4) / 3.0
+    saliency_map = (saliency_map_1 + saliency_map_2 + saliency_map_4) / 9.0
     if params == 'auto':
         a = numpy.mean(saliency_map) / 2.0
         b = numpy.std(saliency_map)
@@ -170,7 +177,7 @@ def _do_slic_iteration(orgb_image, cell_size, labels, distances, cluster_centers
     labels = -1 * numpy.ones(orgb_image.shape[:2])
     distances = sys.float_info.max * numpy.ones(orgb_image.shape[:2])
 
-    for i in xrange(cluster_centers):
+    for i in xrange(len(cluster_centers)):
         center_x, center_y = cluster_centers[i][0], cluster_centers[i][1]
         low_x, high_x = int(center_x - cell_size), int(center_x - cell_size + 1)
         low_y, high_y = int(center_y - cell_size), int(center_y - cell_size + 1)
@@ -194,7 +201,7 @@ def _do_slic_iteration(orgb_image, cell_size, labels, distances, cluster_centers
         labels[low_y:high_y, low_x:high_x] = i
         distances[low_y:high_y, low_x:high_x] = window_distances
 
-    for i in xrange(cluster_centers):
+    for i in xrange(len(cluster_centers)):
         current_cluster_idx = (labels == i)
         current_cluster = orgb_image[current_cluster_idx]
 

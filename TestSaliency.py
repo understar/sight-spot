@@ -24,9 +24,6 @@ if __name__ == '__main__':
     saliency_map = SightSpotUtil.eval_saliency_map(orgb_image, 3.0, 60.0, 'auto')
     print 'Saliency map extracted in', time.clock() - start, 'sec.'
 
-    import cProfile
-    cProfile.run('saliency_map = SightSpotUtil.eval_saliency_map(orgb_image, 3.0, 60.0, "auto")')
-
     start = time.clock()
     heatmap_image = SightSpotUtil.eval_heatmap(saliency_map)
     print 'Heatmap extracted in', time.clock() - start, 'sec.'
