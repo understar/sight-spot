@@ -160,69 +160,87 @@ def _init_clusters_centers(orgb_image, cell_size):
     cell_number_y = int(float(height) / cell_size - 0.5)
     pad_x = 0.5 * (width - cell_number_x * cell_size)
     pad_y = 0.5 * (height - cell_number_y * cell_size)
-    assert(pad_x >= 2.0)
-    assert(pad_y >= 2.0)
+    assert(pad_x >= 1.0)
+    assert(pad_y >= 1.0)
     cluster_centers = []
-    for ny in xrange(cell_number_y):
+    for ny in xrange(cell_number_y + 1):
         y = ny * cell_size + pad_y
-        for nx in xrange(cell_number_x):
+        for nx in xrange(cell_number_x + 1):
             x = nx * cell_size + pad_x
             lx, ly = _get_lowest_grad_pos(orgb_image, x, y)
-            cluster_centers.append((lx, ly, orgb_image[y, x]))
+            cluster_centers.append((lx, ly, orgb_image[ly, lx]))
     return cluster_centers
 
 def _do_slic_iteration(orgb_image, cell_size, labels, distances, cluster_centers, alpha):
     width = orgb_image.shape[1]
     height = orgb_image.shape[0]
-    labels = -1 * numpy.ones(orgb_image.shape[:2])
-    distances = sys.float_info.max * numpy.ones(orgb_image.shape[:2])
+    coordinates = numpy.mgrid[0:height,0:width].swapaxes(0,2).swapaxes(0,1)
 
     for i in xrange(len(cluster_centers)):
         center_x, center_y = cluster_centers[i][0], cluster_centers[i][1]
-        low_x, high_x = int(center_x - cell_size), int(center_x - cell_size + 1)
-        low_y, high_y = int(center_y - cell_size), int(center_y - cell_size + 1)
+        low_x, high_x = int(center_x - cell_size), int(center_x + cell_size + 1)
+        low_y, high_y = int(center_y - cell_size), int(center_y + cell_size + 1)
         low_x = max(0, low_x)
         high_x = min(width, high_x)
         low_y = max(0, low_y)
         high_y = min(height, high_y)
         window = orgb_image[low_y:high_y, low_x:high_x]
+        window_distances = distances[low_y:high_y, low_x:high_x]
 
         color_diff = window - cluster_centers[i][2]
         color_dist = numpy.sqrt(numpy.sum(numpy.square(color_diff), axis=2)) / 3.0
-        mesh_x = numpy.square(numpy.arange(low_x, high_x) - center_x)
-        mesh_y = numpy.square(numpy.arange(low_y, high_y) - center_y)
+        mesh_x = numpy.square((numpy.arange(low_x, high_x) - center_x) / cell_size)
+        mesh_y = numpy.square((numpy.arange(low_y, high_y) - center_y) / cell_size)
         mesh_xx, mesh_yy = numpy.meshgrid(mesh_x, mesh_y)
         coordinate_dist = numpy.sqrt(mesh_xx + mesh_yy)
-        total_dist = color_dist + alpha * coordinate_dist
+        total_dist = (1.0 - alpha) * color_dist + alpha * coordinate_dist
 
-        window_distances = distances[low_y:high_y, low_x:high_x]
-        threshold_idx = total_dist < window_distances
-        window_distances[threshold_idx] = total_dist[total_dist]
-        labels[low_y:high_y, low_x:high_x] = i
+        threshold_idx = (total_dist < window_distances)
+        window_distances[threshold_idx] = total_dist[threshold_idx]
+
+        labels[low_y:high_y, low_x:high_x][threshold_idx] = i
         distances[low_y:high_y, low_x:high_x] = window_distances
 
     for i in xrange(len(cluster_centers)):
         current_cluster_idx = (labels == i)
-        current_cluster = orgb_image[current_cluster_idx]
-
-        distnp = indnp[idx]
-        self.centers[k][0:3] = np.sum(colornp, axis=0)
-        sumy, sumx = np.sum(distnp, axis=0)
-        self.centers[k][3:] = sumx, sumy
-        self.centers[k] /= np.sum(idx)
+        cluster_size = numpy.sum(current_cluster_idx)
+        if cluster_size != 0:
+            new_coordinates = numpy.sum(coordinates[current_cluster_idx], axis=0)
+            new_x = new_coordinates[1] / cluster_size
+            new_y = new_coordinates[0] / cluster_size
+            new_color = numpy.sum(orgb_image[current_cluster_idx], axis=0) / cluster_size
+            cluster_centers[i] = (new_x, new_y, new_color)
 
 def _restore_connectivity():
+
+
     pass
 
-def eval_slic_map(orgb_image, cell_size, alpha, iteration_number):
+def eval_slic_map(orgb_image, cell_size, alpha, iteration_number=16):
     """
+    Calculates segmentation map of given ORGB image by SLIC algorithm.
 
+    Parameters
+    ----------
+    orgb_image : ndarray
+        Should be 3 channel oRGB image with float32 channels
+    cell_size : int
+        Controls number of clusters.
+    alpha : float
+        Define what is more important - cluster compactness or color similarity.
+    iteration_number : int
+        Number of iteration. Default value is 16.
+
+    Returns
+    -------
+    out : ndarray
+        Segmentation labels map for each pixel.
     """
     assert(cell_size >= 4)
-    labels = -1 * numpy.ones(orgb_image.shape[:2])
-    distances = sys.float_info.max * numpy.ones(orgb_image.shape[:2])
     cluster_centers = _init_clusters_centers(orgb_image, cell_size)
     for k in xrange(iteration_number):
+        labels = -1 * numpy.ones(orgb_image.shape[:2], dtype='uint32')
+        distances = sys.float_info.max * numpy.ones(orgb_image.shape[:2], dtype='float32')
         _do_slic_iteration(orgb_image, cell_size, labels, distances, cluster_centers, alpha)
     _restore_connectivity()
     return labels
