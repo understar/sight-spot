@@ -211,10 +211,82 @@ def _do_slic_iteration(orgb_image, cell_size, labels, distances, cluster_centers
             new_color = numpy.sum(orgb_image[current_cluster_idx], axis=0) / cluster_size
             cluster_centers[i] = (new_x, new_y, new_color)
 
-def _restore_connectivity():
+def _extract_connected_components(labels):
+    width = labels.shape[1] + 1
+    height = labels.shape[0] + 1
+    pad_labels = -2 * numpy.ones((height, width), dtype='int32')
+    pad_labels[1:,1:] = labels[:,:]
+    components = -1 * numpy.ones(pad_labels.shape, dtype='int32')
 
+    component_counter = 0
+    equality_classes = dict()
+    for y in xrange(1, height):
+        for x in xrange(1, width):
+            center_label = pad_labels[y, x]
+            left_label, top_label = pad_labels[y, x-1], pad_labels[y-1, x]
+            left_is_neighbor, top_is_neighbor = (center_label == left_label), (center_label == top_label)
+            if left_is_neighbor or top_is_neighbor:
+                min_label = min(left_label, top_label)
+                if left_is_neighbor and top_is_neighbor:
+                    max_label = max(left_label, top_label)
+                    if max_label not in equality_classes:
+                        equality_classes[max_label] = set()
+                    equality_classes[max_label].add(min_label)
+                components[y, x] = min_label
+            else:
+                components[y, x] = component_counter
+                component_counter += 1
+
+    components = components[1:, 1:]
+    number_of_components = numpy.max(components) + 1
+    mapping = numpy.arange(0, number_of_components)
+    for i in xrange(number_of_components):
+        equality_class = i
+        while equality_class in equality_classes:
+            equality_class = min(equality_classes[equality_class])
+        mapping[i] = equality_class
+    components = mapping[components]
+    assert(labels.shape == components.shape)
+    return components
+
+def _get_adj_matrix(components):
+    width = components.shape[1]
+    height = components.shape[0]
+    number_of_components = numpy.max(components) + 1
+    joint_clusters = []
+
+    horizontal_one = components[:, 0:width-1]
+    horizontal_two = components[:, 1:width]
+    horizontal_idx = (horizontal_one != horizontal_two)
+
+    horizontal_pairs = numpy.extract() # KEY!!!
+
+    vertical_one = components[0:height-1, :]
+    vertical_two = components[1:height, :]
+    vertical_idx = (vertical_one != vertical_two)
+
+    adj_matrix = dict()
+    for i in xrange(number_of_components):
+        adj_matrix[i] = set()
+
+    return adj_matrix
+
+def _find_broken_components(labels, components, cluster_centers):
+    number_of_components = numpy.max(components) + 1
+    is_broken = [True] * number_of_components
+    for i in xrange(number_of_components):
+        # KILL -1
+        # SAVE THAT WHO HAS CLUSTER
 
     pass
+
+def _enforce_connectivity(orgb_image, labels, cluster_centers):
+    components = _extract_connected_components(labels)
+    adj_matrix = _get_adj_matrix(components)
+    broken_components = _find_broken_components(components, cluster_centers)
+
+    #_reassign_it
+    labels = components
 
 def eval_slic_map(orgb_image, cell_size, alpha, iteration_number=16):
     """
@@ -239,10 +311,10 @@ def eval_slic_map(orgb_image, cell_size, alpha, iteration_number=16):
     assert(cell_size >= 4)
     cluster_centers = _init_clusters_centers(orgb_image, cell_size)
     for k in xrange(iteration_number):
-        labels = -1 * numpy.ones(orgb_image.shape[:2], dtype='uint32')
+        labels = -1 * numpy.ones(orgb_image.shape[:2], dtype='int32')
         distances = sys.float_info.max * numpy.ones(orgb_image.shape[:2], dtype='float32')
         _do_slic_iteration(orgb_image, cell_size, labels, distances, cluster_centers, alpha)
-    _restore_connectivity()
+    _enforce_connectivity(orgb_image, labels, cluster_centers)
     return labels
 
 ################################################################################
