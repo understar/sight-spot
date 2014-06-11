@@ -70,6 +70,7 @@ if __name__ == '__main__':
     start = time.clock()
     segmentation_map = SightSpotUtil.eval_slic_map(orgb_image, 64.0, 0.25, 16)
     print 'Segmentation map extracted in', time.clock() - start, 'sec.'
+    print 'Segment number:', numpy.max(segmentation_map) + 1
 
     _visualize_clusters(segmentation_map).show('Clusters in random colors')
     _visualize_contours(rgb_image, segmentation_map, (255, 255, 0)).show('Cluster contours')
