@@ -216,65 +216,18 @@ def _do_slic_iteration(orgb_image, cell_size, labels, distances, cluster_centers
             new_color = numpy.sum(orgb_image[current_cluster_idx], axis=0) / cluster_size
             cluster_centers[i] = (new_x, new_y, new_color)
 
-def _extract_connected_components(labels):
-    NEIGHBOR_DIR_X = numpy.array([-1, -1, 0, 1], dtype='int32')
-    NEIGHBOR_DIR_Y = numpy.array([0, -1, -1, -1], dtype='int32')
-    width = labels.shape[1] + 2
-    height = labels.shape[0] + 2
-    pad_labels = -2 * numpy.ones((height, width), dtype='int32')
-    pad_labels[1:height-1,1:width-1] = labels[:,:]
-    components = -1 * numpy.ones(pad_labels.shape, dtype='int32')
+def _label_unassigned_pixels(labels):
+    neg_idx = (labels < 0)
+    neg_map = neg_idx.astype('int32')
+    labeled_array, num_features = scipy.ndimage.label(neg_map, structure=[[1,1,1],[1,1,1],[1,1,1]])
+    labeled_array[neg_idx] += numpy.max(labels)
+    labeled_array += labels
+    return labeled_array
 
-    component_counter = 0
-    equalities = set()
-    for y in xrange(1, height-1):
-        for x in xrange(1, width-1):
-            center_label = pad_labels[y, x]
-            shifted_x = x + NEIGHBOR_DIR_X
-            shifted_y = y + NEIGHBOR_DIR_Y
-            neighbor_labels = pad_labels[shifted_y, shifted_x]
-            neighbor_components = components[shifted_y, shifted_x]
-            neighbors_idx = (neighbor_labels == center_label) & (neighbor_components >= 0)
-            neighbor_components = neighbor_components[neighbors_idx]
-            neighbors_number = numpy.sum(neighbors_idx)
-
-            if neighbors_number == 0:
-                components[y, x] = component_counter
-                component_counter += 1
-            else:
-                components[y, x] = numpy.min(neighbor_components)
-                new_equalities = itertools.combinations(set(neighbor_components), 2)
-                equalities.update(new_equalities)
-
-    equality_classes = dict()
-    for item in equalities:
-        i = max(item[0], item[1])
-        j = min(item[0], item[1])
-        if i not in equality_classes:
-            equality_classes[i] = set()
-        equality_classes[i].add(j)
-
-    components = components[1:height-1, 1:width-1]
-    number_of_components = numpy.max(components) + 1
-    mapping = numpy.arange(0, number_of_components)
-    for i in xrange(number_of_components):
-        equality_class = i
-        while equality_class in equality_classes:
-            equality_class = min(equality_classes[equality_class])
-        mapping[i] = equality_class
-    unique_elements = numpy.unique(mapping)
-    for i in xrange(len(unique_elements)):
-        mapping[mapping == unique_elements[i]] = i
-    components = mapping[components]
-    number_of_components = len(unique_elements)
-
-    assert(labels.shape == components.shape)
-    return components, number_of_components
-
-def _get_adj_by_direction(components, dx, dy, joint_clusters):
+def _get_adj_by_direction(labels, dx, dy, joint_clusters):
     assert(dx in {-1, 0, 1} and dy in {-1, 0, 1} and ((dx != 0) or (dy != 0)))
-    width = components.shape[1]
-    height = components.shape[0]
+    width = labels.shape[1]
+    height = labels.shape[0]
     start_x, stop_x = 0, width - abs(dx)
     start_y, stop_y = 0, height - abs(dy)
     if dx < 0:
@@ -283,8 +236,8 @@ def _get_adj_by_direction(components, dx, dy, joint_clusters):
     if dy < 0:
         start_y -= dy
         stop_y -= dy
-    direction_first = components[start_y:stop_y, start_x:stop_x]
-    direction_second = components[start_y+dy:stop_y+dy, start_x+dx:stop_x+dx]
+    direction_first = labels[start_y:stop_y, start_x:stop_x]
+    direction_second = labels[start_y+dy:stop_y+dy, start_x+dx:stop_x+dx]
     assert(direction_first.shape == direction_second.shape)
 
     border_idx = (direction_first != direction_second)
@@ -293,12 +246,12 @@ def _get_adj_by_direction(components, dx, dy, joint_clusters):
     neighbors_zipped = zip(neighbor_one, neighbor_two)
     joint_clusters.update(neighbors_zipped)
 
-def _get_adj_matrix(components, number_of_components):
+def _get_adj_matrix(labels, number_of_components):
     joint_clusters = set()
-    _get_adj_by_direction(components, 1, 0, joint_clusters)
-    _get_adj_by_direction(components, 0, 1, joint_clusters)
-    _get_adj_by_direction(components, 1, 1, joint_clusters)
-    _get_adj_by_direction(components, -1, 1, joint_clusters)
+    _get_adj_by_direction(labels, 1, 0, joint_clusters)
+    _get_adj_by_direction(labels, 0, 1, joint_clusters)
+    _get_adj_by_direction(labels, 1, 1, joint_clusters)
+    _get_adj_by_direction(labels, -1, 1, joint_clusters)
 
     adj_matrix = dict()
     for i in xrange(number_of_components):
@@ -308,27 +261,25 @@ def _get_adj_matrix(components, number_of_components):
         adj_matrix[item[1]].add(item[0])
     return adj_matrix
 
-def _get_component_masks(components, number_of_components):
-    component_masks = []
-    for i in xrange(number_of_components):
-        component_masks.append(components == i)
-    return component_masks
+def _get_component_masks(labels, number_of_clusters):
+    labels_masks = []
+    for i in xrange(number_of_clusters):
+        labels_masks.append(labels == i)
+    return labels_masks
 
-def _find_broken(labels, components, number_of_components, masks, cluster_centers, cell_size):
+def _find_broken(labels, number_of_clusters, masks, cluster_centers, cell_size):
     min_area = int(0.1 * cell_size * cell_size + 0.5)
-    is_broken = numpy.array([True] * number_of_components, dtype='bool')
+    is_broken = numpy.array([True] * number_of_clusters, dtype='bool')
     for center in cluster_centers:
         x, y = center[0], center[1]
-        is_broken[components[y, x]] = False
-    for i in xrange(number_of_components):
+        is_broken[labels[y, x]] = False
+    for i in xrange(number_of_clusters):
         component_idx = masks[i]
         if numpy.sum(component_idx) < min_area:
             is_broken[i] = True
-        if numpy.mean(labels[component_idx]) < 0.0:
-            is_broken[i] = True
-    return list(numpy.arange(0, number_of_components)[is_broken])
+    return list(numpy.arange(0, number_of_clusters)[is_broken])
 
-def _get_component_colors(orgb_image, components, number_of_components, masks):
+def _get_cluster_colors(orgb_image, number_of_components, masks):
     component_colors = []
     for i in xrange(number_of_components):
         component_idx = masks[i]
@@ -338,29 +289,36 @@ def _get_component_colors(orgb_image, components, number_of_components, masks):
     return component_colors
 
 def _enforce_connectivity(orgb_image, labels, cluster_centers, cell_size):
-    components, number_of_components = _extract_connected_components(labels)
-    adj_matrix = _get_adj_matrix(components, number_of_components)
-    masks = _get_component_masks(components, number_of_components)
-    broken_components = _find_broken(labels, components, number_of_components, masks, cluster_centers, cell_size)
-    component_colors = _get_component_colors(orgb_image, components, number_of_components, masks)
-    for i in broken_components:
-        current_color = component_colors[i]
-        component_idx = masks[i]
-        adj_clusters = adj_matrix[i]
-        new_component = i
-        min_distance = sys.float_info.max
-        for j in adj_clusters:
-            cluster_color = component_colors[j]
-            distance = numpy.sqrt(numpy.sum(numpy.square(cluster_color - current_color))) / 3.0
-            if distance < min_distance:
-                min_distance = distance
-                new_component = j
-        components[component_idx] = new_component
-    return components
+    labels = _label_unassigned_pixels(labels)
+    number_of_clusters = numpy.max(labels) + 1
+    masks = _get_component_masks(labels, number_of_clusters)
+    broken_clusters = _find_broken(labels, number_of_clusters, masks, cluster_centers, cell_size)
+    if len(broken_clusters) > 0:
+        adj_matrix = _get_adj_matrix(labels, number_of_clusters)
+        cluster_colors = _get_cluster_colors(orgb_image, number_of_clusters, masks)
+        for i in broken_clusters:
+            current_color = cluster_colors[i]
+            cluster_idx = masks[i]
+            adj_clusters = adj_matrix[i]
+            new_label = i
+            min_distance = sys.float_info.max
+            for j in adj_clusters:
+                cluster_color = cluster_colors[j]
+                distance = numpy.sqrt(numpy.sum(numpy.square(cluster_color - current_color))) / 3.0
+                if distance < min_distance:
+                    min_distance = distance
+                    new_label = j
+            labels[cluster_idx] = new_label
+    unique_labels = numpy.unique(labels)
+    mapping = numpy.zeros(number_of_clusters, dtype='int32')
+    for i in xrange(len(unique_labels)):
+        mapping[unique_labels[i]] = i
+    labels = mapping[labels]
+    return labels
 
 def eval_slic_map(orgb_image, cell_size, alpha, iteration_number=16):
     """
-    Calculates segmentation map of given ORGB image by SLIC algorithm.
+    Calculates segmentation map of given oRGB image by SLIC algorithm.
 
     Parameters
     ----------
@@ -384,7 +342,7 @@ def eval_slic_map(orgb_image, cell_size, alpha, iteration_number=16):
         labels = -1 * numpy.ones(orgb_image.shape[:2], dtype='int32')
         distances = sys.float_info.max * numpy.ones(orgb_image.shape[:2], dtype='float32')
         _do_slic_iteration(orgb_image, cell_size, labels, distances, cluster_centers, alpha)
-    #labels = _enforce_connectivity(orgb_image, labels, cluster_centers, cell_size)
+    labels = _enforce_connectivity(orgb_image, labels, cluster_centers, cell_size)
     return labels
 
 ################################################################################
@@ -473,7 +431,7 @@ def threshold(map, values='auto'):
         List of thresholded maps.
     """
     if values == 'auto':
-        values = [2.0 * numpy.mean(map)]
+        values = [1.2 * numpy.mean(map)]
     if not isinstance(values, collections.Iterable):
         values = list(values)
     result = []
@@ -503,7 +461,7 @@ def remove_background(rgb_image, map, value='auto'):
         List of thresholded maps.
     """
     if value == 'auto':
-        value = 2.0 * numpy.mean(map)
+        value = 1.2 * numpy.mean(map)
     assert(0.0 < value)
     idx = (map < value)
     result = rgb_image.copy()
