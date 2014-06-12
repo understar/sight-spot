@@ -67,7 +67,7 @@ if __name__ == '__main__':
     orgb_image = SightSpotUtil.eval_orgb_image(rgb_image)
 
     start = time.clock()
-    segmentation_map = SightSpotUtil.eval_slic_map(orgb_image, 32.0, 0.25, 8)
+    segmentation_map = SightSpotUtil.eval_slic_map(orgb_image, 32.0, 0.25, 4)
     print 'Segmentation map extracted in', time.clock() - start, 'sec.'
     print 'Segment number:', numpy.max(segmentation_map) + 1
 
@@ -75,7 +75,10 @@ if __name__ == '__main__':
     _visualize_contours(rgb_image, segmentation_map, (255, 255, 0)).show('Cluster contours')
     _visualize_averaging(rgb_image, segmentation_map).show('Averaging')
 
-    import cProfile
-    cProfile.run('segmentation_map = SightSpotUtil.eval_slic_map(orgb_image, 32.0, 0.25, 8)')
+    print 'Use segmentation to improve clustering...'
+    saliency_map = SightSpotUtil.eval_saliency_map(orgb_image, 3.0, 60.0, 'auto')
+    precise_saliency_map = SightSpotUtil.combine_saliency_and_segmentation(saliency_map, segmentation_map)
+    precise_saliency_image = Image.fromarray(precise_saliency_map * 255)
+    precise_saliency_image.show('Pixel-precise saliency image')
 
 

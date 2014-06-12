@@ -12,6 +12,7 @@ __version__   = "1.0"
 import math
 import sys
 import itertools
+import collections
 import numpy
 import numpy.linalg
 import scipy.ndimage
@@ -23,12 +24,17 @@ def _eval_new_orgb_angle(rt, mask, add, mul):
 
 def eval_orgb_image(rgb_image):
     """
-    Converts specified PIL image to 3d NumPy array with oRGB components.
+    Converts specified RGB image to array with oRGB components.
 
     Parameters
     ----------
-    rgb_image : PIL.Image
+    rgb_image : ndarray
         Should be 3 channel RGB image with 8bit per channels
+
+    Returns
+    -------
+    out : ndarray
+        oRGB representation of image.
     """
     assert(len(rgb_image.shape) == 3)
     assert(rgb_image.shape[-1] == 3)
@@ -231,6 +237,7 @@ def _extract_connected_components(labels):
             neighbors_idx = (neighbor_labels == center_label) & (neighbor_components >= 0)
             neighbor_components = neighbor_components[neighbors_idx]
             neighbors_number = numpy.sum(neighbors_idx)
+
             if neighbors_number == 0:
                 components[y, x] = component_counter
                 component_counter += 1
@@ -427,8 +434,91 @@ def eval_heatmap(saliency_map):
     heatmap = palette[indices]
     return Image.fromarray(heatmap)
 
+def combine_saliency_and_segmentation(saliency_map, segmentation_map):
+    """
+    Combines saliency map and segmentation map producing pixel-precise segmentation.
+
+    Parameters
+    ----------
+    saliency_map : ndarray
+        Should be 2D-array with [0, 1] items.
+    segmentation_map : ndarray
+        Should be 2D-array with nonnegative integer items.
+
+    Returns
+    -------
+    out : ndarray
+        New saliency map with pixel precision.
+    """
+    palette = scipy.ndimage.mean(saliency_map, segmentation_map, numpy.arange(0, numpy.max(segmentation_map) + 1))
+    palette = numpy.array(palette)
+    return palette[segmentation_map]
+
 ################################################################################
 
-#def eval
+def threshold(map, values='auto'):
+    """
+    Thresholds (binarizes) saliency map.
 
-#def get_
+    Parameters
+    ----------
+    saliency_map : ndarray
+        Should be 2D-array with [0, 1] items.
+    values : float, iterable or 'auto'
+        All items should be in [0, 1].
+
+    Returns
+    -------
+    out : ndarray
+        List of thresholded maps.
+    """
+    if values == 'auto':
+        values = [2.0 * numpy.mean(map)]
+    if not isinstance(values, collections.Iterable):
+        values = list(values)
+    result = []
+    for value in values:
+        assert(0.0 < value)
+        idx = (map >= value)
+        threshold_map = idx.astype('int32')
+        result.append(threshold_map)
+    return result
+
+def remove_background(rgb_image, map, value='auto'):
+    """
+    Substitute background pixels by black color.
+
+    Parameters
+    ----------
+    rgb_image : ndarray
+        Should be 3 channel RGB image with 8bit per channels
+    saliency_map : ndarray
+        Should be 2D-array with [0, 1] items.
+    values : float or 'auto'
+        All items should be in [0, 1].
+
+    Returns
+    -------
+    out : ndarray
+        List of thresholded maps.
+    """
+    if value == 'auto':
+        value = 2.0 * numpy.mean(map)
+    assert(0.0 < value)
+    idx = (map < value)
+    result = rgb_image.copy()
+    result[idx] = [0, 0, 0]
+    return result
+
+def detect_boxes(map, values='auto'):
+    """
+
+    """
+    pass
+
+
+def detect_objects(rgb_array, map, values='auto'):
+    """
+
+    """
+    pass
