@@ -56,7 +56,6 @@ def _visualize_averaging(rgb_image, segmentation_map):
         else:
             avg = numpy.sum(rgb_image[cluster_idx], axis=0) / cluster_size
             palette_items.append(tuple(avg))
-    print  palette_items
     palette = numpy.array(palette_items, dtype='uint8')
     visualization = palette[segmentation_map + 1]
     return Image.fromarray(visualization)
@@ -68,7 +67,7 @@ if __name__ == '__main__':
     orgb_image = SightSpotUtil.eval_orgb_image(rgb_image)
 
     start = time.clock()
-    segmentation_map = SightSpotUtil.eval_slic_map(orgb_image, 64.0, 0.25, 16)
+    segmentation_map = SightSpotUtil.eval_slic_map(orgb_image, 32.0, 0.25, 8)
     print 'Segmentation map extracted in', time.clock() - start, 'sec.'
     print 'Segment number:', numpy.max(segmentation_map) + 1
 
@@ -76,5 +75,7 @@ if __name__ == '__main__':
     _visualize_contours(rgb_image, segmentation_map, (255, 255, 0)).show('Cluster contours')
     _visualize_averaging(rgb_image, segmentation_map).show('Averaging')
 
-    #import cProfile
-    #cProfile.run('segmentation_map = SightSpotUtil.eval_slic_map(orgb_image, 32.0, 0.1, 16)')
+    import cProfile
+    cProfile.run('segmentation_map = SightSpotUtil.eval_slic_map(orgb_image, 32.0, 0.25, 8)')
+
+
