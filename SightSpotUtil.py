@@ -11,8 +11,6 @@ __version__   = "1.0"
 
 import math
 import sys
-import itertools
-import collections
 import numpy
 import numpy.linalg
 import scipy.ndimage
@@ -87,7 +85,7 @@ def eval_saliency_map(orgb_image, small_sigma, large_sigma, params=(0.0, 0.0, 0.
         Controls blur - it`s best to set ~ 1% of input image dimension.
     large_sigma : float
         Controls blur - it`s best to set ~ 20% of input image dimension.
-    params : 3-tuple of floats or 'auto'
+    params : 3-tuple of floats or 'auto' (can be omited - no correction this way)
         Nonlinear correction is applied to saliency map to make it perceive better.
 
     Returns
@@ -181,7 +179,7 @@ def _init_clusters_centers(orgb_image, cell_size):
 def _do_slic_iteration(orgb_image, cell_size, labels, distances, cluster_centers, alpha):
     width = orgb_image.shape[1]
     height = orgb_image.shape[0]
-    coordinates = numpy.mgrid[0:height,0:width].swapaxes(0,2).swapaxes(0,1)
+    coordinates = numpy.mgrid[0:height, 0:width].swapaxes(0, 2).swapaxes(0, 1)
 
     for i in xrange(len(cluster_centers)):
         center_x, center_y = cluster_centers[i][0], cluster_centers[i][1]
@@ -336,7 +334,7 @@ def eval_slic_map(orgb_image, cell_size, alpha, iteration_number=16):
     out : ndarray
         Segmentation labels map for each pixel.
     """
-    assert(cell_size >= 4)
+    assert(cell_size >= 4.0)
     cluster_centers = _init_clusters_centers(orgb_image, cell_size)
     for k in xrange(iteration_number):
         labels = -1 * numpy.ones(orgb_image.shape[:2], dtype='int32')
@@ -414,7 +412,16 @@ def combine_saliency_and_segmentation(saliency_map, segmentation_map):
 
 ################################################################################
 
-def threshold(map, values='auto'):
+def _estimate_threshold(saliency_map):
+    return 1.2 * numpy.mean(saliency_map)
+
+def _get_salient_mask(saliency_map, value='auto'):
+    if value == 'auto':
+        value = _estimate_threshold(saliency_map)
+    assert(0.0 < value)
+    return (saliency_map >= value)
+
+def threshold(saliency_map, value='auto'):
     """
     Thresholds (binarizes) saliency map.
 
@@ -422,27 +429,19 @@ def threshold(map, values='auto'):
     ----------
     saliency_map : ndarray
         Should be 2D-array with [0, 1] items.
-    values : float, iterable or 'auto'
-        All items should be in [0, 1].
+    value : float or 'auto'
+        Scalar should be in [0, 1].
 
     Returns
     -------
     out : ndarray
         List of thresholded maps.
     """
-    if values == 'auto':
-        values = [1.2 * numpy.mean(map)]
-    if not isinstance(values, collections.Iterable):
-        values = list(values)
-    result = []
-    for value in values:
-        assert(0.0 < value)
-        idx = (map >= value)
-        threshold_map = idx.astype('int32')
-        result.append(threshold_map)
-    return result
+    idx = _get_salient_mask(saliency_map, value)
+    threshold_map = idx.astype('int32')
+    return threshold_map
 
-def remove_background(rgb_image, map, value='auto'):
+def remove_background(rgb_image, saliency_map, value='auto'):
     """
     Substitute background pixels by black color.
 
@@ -452,31 +451,88 @@ def remove_background(rgb_image, map, value='auto'):
         Should be 3 channel RGB image with 8bit per channels
     saliency_map : ndarray
         Should be 2D-array with [0, 1] items.
-    values : float or 'auto'
-        All items should be in [0, 1].
+    value : float or 'auto'
+        Scalar should be in [0, 1].
 
     Returns
     -------
     out : ndarray
         List of thresholded maps.
     """
-    if value == 'auto':
-        value = 1.2 * numpy.mean(map)
-    assert(0.0 < value)
-    idx = (map < value)
+    idx = _get_salient_mask(saliency_map, value)
     result = rgb_image.copy()
-    result[idx] = [0, 0, 0]
+    result[~idx] = [0, 0, 0]
+    return result.astype('uint8')
+
+def detect_bounds(saliency_map, value='auto', type='rect'):
+    """
+    Detects bounds of salient objects (rect, square of circle).
+
+    Parameters
+    ----------
+    saliency_map : ndarray
+        Should be 2D-array with [0, 1] items.
+    value : float or 'auto'
+        Scalar should be in [0, 1].
+    type : string
+        'rect' (default) or 'square'
+
+    Returns
+    -------
+    out : ndarray
+        List of thresholded maps.
+    """
+    idx = _get_salient_mask(saliency_map, value)
+    threshold_map = idx.astype('int32')
+    components, number_of_components = scipy.ndimage.label(threshold_map, structure=[[1,1,1],[1,1,1],[1,1,1]])
+    coordinates = numpy.mgrid[0:saliency_map.shape[0], 0:saliency_map.shape[1]].swapaxes(0, 2).swapaxes(0, 1)
+    bounds = []
+    for i in xrange(1, number_of_components + 1):
+        component_idx = (components == i)
+        items = coordinates[component_idx]
+        if type == 'rect':
+            min_bounds = numpy.min(items, axis=0)
+            max_bounds = numpy.max(items, axis=0)
+            x1 = min_bounds[1]
+            y1 = min_bounds[0]
+            x2 = max_bounds[1]
+            y2 = max_bounds[0]
+            assert((x1 <= x2) and (y1 <= y2) and (x2 <= saliency_map.shape[1]) and (y2 <= saliency_map.shape[0]))
+            bounds.append((x1, y1, x2, y2))
+        else:
+            area = numpy.sum(component_idx)
+            r = math.sqrt(float(area)) / 2.0
+            center = numpy.mean(items, axis=0)
+            x = center[1]
+            y = center[0]
+            assert((x < saliency_map.shape[1]) and (y < saliency_map.shape[0]))
+            bounds.append((x, y, r))
+    return bounds
+
+def detect_objects(rgb_array, saliency_map, value='auto'):
+    """
+    Extracts salient objects from image.
+
+    Parameters
+    ----------
+    rgb_image : ndarray
+        Should be 3 channel RGB image with 8bit per channels
+    saliency_map : ndarray
+        Should be 2D-array with [0, 1] items.
+    value : float or 'auto'
+        Scalar should be in [0, 1].
+
+    Returns
+    -------
+    out : list of ndarrays
+        Extracted salient objects (sub-images of input image containing objects).
+    """
+    bounds = detect_bounds(saliency_map, value='auto')
+    result = []
+    for x1, y1, x2, y2 in bounds:
+        object = rgb_array[y1:y2+1, x1:x2+1, :]
+        result.append(object)
     return result
 
-def detect_boxes(map, values='auto'):
-    """
-
-    """
-    pass
-
-
-def detect_objects(rgb_array, map, values='auto'):
-    """
-
-    """
-    pass
+if __name__ == '__main__':
+    print __doc__
